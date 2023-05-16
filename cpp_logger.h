@@ -80,7 +80,7 @@ public:
     void fatal(const std::string &message);
 
     static Logger &getInstance() {
-        static Logger instance("log.txt", std::cout);   // 单例模式, 默认输出到控制台
+        static Logger instance("", std::cout);   // 单例模式, 默认输出到控制台
         return instance;
     }
 
