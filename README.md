@@ -14,3 +14,31 @@
 1. 加入`std::mutex`和`std::condition_variable`，分别用于加锁和唤醒线程。
 2. 以上两个问题都解决了，但是还有一个问题，就是当日志文件写满时，会出现问题，因为此时写入的位置会回到文件开头，这样就会覆盖之前的日志，所以需要加入一个判断，当写入的位置超过文件大小时，就不再写入，直到文件被清空。
 3. 使用posix_memalign函数分配内存，该函数可以保证分配的内存是页的整数倍。
+
+
+## 2023年6月5日22:10:08 (Provided by GPT-3.5)
+
+**问题描述：**
+我们的代码出现了重复格式化日志的问题。原因在于我们误解了Formatter类的目的。Formatter类的目的是用于格式化日志消息，我们在`writeThread`中正确地使用它来格式化推入`logQueue`的消息。然而，在我们的`readThread`中，我们对那些已经格式化的日志进行拆分，然后再次格式化。这导致了日志嵌套格式化的现象，使得输出混乱。
+
+**解决方案：**
+我们在读取线程中直接将消息从日志队列写入文件，而不是再次格式化它们。这样做，我们可以确保日志消息正确格式化，避免了重复格式化的问题。
+
+```cpp
+readThreads.emplace_back([&]() {
+  while (!logger.stopFlag) {
+    std::unique_lock<std::mutex> lock(queueMutex);
+    logger.cv.wait(lock, [&]() { return !logQueue.empty() || logger.stopFlag; });
+
+    while (!logQueue.empty()) {
+      std::string logMessage = logQueue.front();
+      logQueue.pop();
+
+      logger.writeLog(logMessage.c_str());
+      std::cout << "Reader " << i << ": " << logMessage << std::endl;
+    }
+  }
+});
+```
+
+通过这次修改，我们提高了代码的效率和可读性，使得程序更为稳健。
