@@ -148,9 +148,6 @@ public:
   }
 };
 
-
-
-
 int main() {
   Logger logger("log.txt");
   Filter filter(LogLevel::INFO);
@@ -183,45 +180,20 @@ int main() {
   std::vector<std::thread> readThreads;
   for (int i = 0; i < 10; ++i) {
     readThreads.emplace_back([&]() {
-  while (!logger.stopFlag) {
-    std::unique_lock<std::mutex> lock(queueMutex);
-    logger.cv.wait(lock,
-                   [&]() { return !logQueue.empty() || logger.stopFlag; });
+      while (!logger.stopFlag) {
+        std::unique_lock<std::mutex> lock(queueMutex);
+        logger.cv.wait(lock,
+                       [&]() { return !logQueue.empty() || logger.stopFlag; });
 
-    while (!logQueue.empty()) {
-      char log[logSize];
-      std::string logMessage = logQueue.front();
-      logQueue.pop();
+        while (!logQueue.empty()) {
+          std::string logMessage = logQueue.front();
+          logQueue.pop();
 
-      std::istringstream iss(logMessage);
-
-      // Extract timestamp
-      std::string timestamp;
-      iss >> timestamp;
-
-      // Extract log level
-      std::string logLevelStr;
-      std::getline(iss >> std::ws, logLevelStr, ' ');
-      LogLevel level = LogLevel::INFO; // Default level if parsing fails
-      for (int i = 0; i < static_cast<int>(LogLevel::ERROR); ++i) {
-        if (logLevelStr == logLevelStrings[i]) {
-          level = static_cast<LogLevel>(i);
-          break;
+          logger.writeLog(logMessage.c_str());
+          std::cout << "Reader " << i << ": " << logMessage << std::endl;
         }
       }
-
-      // Extract message
-      std::string message;
-      std::getline(iss >> std::ws, message);
-
-      char formattedLog[logSize];
-      formatter.formatLog(formattedLog, level, message.c_str());
-      std::cout << "Reader " << i << ": " << formattedLog << std::endl;
-    }
-  }
-});
-
-
+    });
   }
 
   writeThread.join();
