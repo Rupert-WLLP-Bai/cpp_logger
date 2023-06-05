@@ -1,5 +1,11 @@
 # cpp_logger
 
+# 依赖
+1. boost
+```
+sudo apt-get install libboost-all-dev
+```
+
 # 问题记录
 
 ## 2023年6月5日21:24:04

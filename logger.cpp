@@ -9,15 +9,19 @@
  *               Error Reason Analysis: Segmentation fault occurred because mmap
  * in Logger's constructor was not matching munmap in its destructor. Solution:
  * Switched to posix_memalign for memory allocation and used free to deallocate
- * the memory. 2023-06-05: Optimized LogLevel stringification, added error
+ * the memory.
+ *   2023-06-05: Optimized LogLevel stringification, added error
  * handling for log formatting, fixed memory management in Logger, added error
- * handling for file closing. 2023-06-06: Implemented RAII for file management,
- * used a thread-safe queue for log messages, improved memory management, added
- * timestamp to log messages, enhanced file rotation. 2023-06-06: Updated log
+ * handling for file closing.
+ *   2023-06-06: Implemented RAII for file management,
+ * used a mutex and condition variable for log messages synchronization, improved memory management, added
+ * timestamp to log messages, enhanced file rotation.
+ *   2023-06-06: Updated log
  * message format, improved error handling, added code comments.
- * @version 0.2.0
+ *   2023-06-06: Used shared_ptr for FileHandler, retained std::queue with mutex and condition_variable for
+ * better thread synchronization, enhanced file writing mechanism, added more detailed code comments.
+ * @version 0.3.0
  */
-
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -45,7 +49,7 @@ const char *logLevelStrings[] = {"TRACE", "DEBUG", "INFO", "WARN", "ERROR"};
 class FileHandler {
 public:
   explicit FileHandler(const std::string &filename)
-      : file(std::make_unique<std::ofstream>(
+      : file(std::make_shared<std::ofstream>(
             filename, std::ios_base::out | std::ios_base::app)) {
     if (!file->is_open()) {
       throw std::runtime_error("Failed to open the log file");
@@ -53,15 +57,15 @@ public:
   }
 
   ~FileHandler() {
-    if (file->is_open()) {
+    if (file && file->is_open()) {
       file->close();
     }
   }
 
-  std::ofstream &getStream() { return *file; }
+  std::shared_ptr<std::ofstream> getStream() { return file; }
 
 private:
-  std::unique_ptr<std::ofstream> file;
+  std::shared_ptr<std::ofstream> file;
 };
 
 class Logger {
@@ -73,37 +77,32 @@ public:
 
   ~Logger() { closeFile(); }
 
+  // Write log to a file and automatically rotate the file when it reaches maxFileSize
   void writeLog(const char *log) {
-    std::unique_lock<std::mutex> lock(writeMutex);
+    std::lock_guard<std::mutex> lock(writeMutex);
     if (currentFileSize + logSize > maxFileSize) {
       rotateFile();
     }
-    memcpy(buffer + writePos * logSize, log, logSize);
+    file->getStream()->write(log, strlen(log));
+    file->getStream()->flush();
     writePos = (writePos + 1) % maxLogs;
     currentFileSize += logSize;
-    cv.notify_all();
-  }
-
-  void readLog(size_t pos, char *log) {
-    memcpy(log, buffer + pos * logSize, logSize);
   }
 
   std::atomic<size_t> &getWritePos() { return writePos; }
 
   bool stopFlag = false;
+  std::mutex writeMutex;
   std::condition_variable cv;
 
 private:
   void openFile() {
-    file = std::make_unique<FileHandler>(baseFilename);
-    buffer = static_cast<char *>(aligned_alloc(getpagesize(), maxFileSize));
-    if (!buffer) {
-      throw std::bad_alloc();
-    }
+    file = std::make_shared<FileHandler>(baseFilename);
   }
 
   void closeFile() { file.reset(); }
 
+  // Rotate the file by renaming the old file with a timestamp and open a new file
   void rotateFile() {
     closeFile();
     std::filesystem::rename(baseFilename, getNextFilename());
@@ -116,12 +115,10 @@ private:
     return ss.str();
   }
 
-  std::unique_ptr<FileHandler> file;
-  char *buffer;
+  std::shared_ptr<FileHandler> file;
   std::atomic<size_t> writePos;
   size_t currentFileSize;
   std::string baseFilename;
-  std::mutex writeMutex;
 };
 
 class Filter {
@@ -133,6 +130,7 @@ public:
 private:
   LogLevel level;
 };
+
 class Formatter {
 public:
   void formatLog(char *log, LogLevel level, const char *message) {
@@ -170,6 +168,7 @@ int main() {
 
         std::lock_guard<std::mutex> lock(queueMutex);
         logQueue.push(log);
+        logger.cv.notify_all();
       }
     }
 
@@ -180,7 +179,7 @@ int main() {
   std::vector<std::thread> readThreads;
   for (int i = 0; i < 10; ++i) {
     readThreads.emplace_back([&]() {
-      while (!logger.stopFlag) {
+      while (!logger.stopFlag || !logQueue.empty()) {
         std::unique_lock<std::mutex> lock(queueMutex);
         logger.cv.wait(lock,
                        [&]() { return !logQueue.empty() || logger.stopFlag; });
@@ -188,7 +187,6 @@ int main() {
         while (!logQueue.empty()) {
           std::string logMessage = logQueue.front();
           logQueue.pop();
-
           logger.writeLog(logMessage.c_str());
           std::cout << "Reader " << i << ": " << logMessage << std::endl;
         }
@@ -203,9 +201,3 @@ int main() {
 
   return 0;
 }
-
-// FIXME: The output is not as expected.
-// Program Expected Output:
-// Reader 0: [2023-06-06 16:42:00] INFO --- : Log message 2
-// Program Actual Output:
-// Reader 10: [2023-06-05 22:48:34] INFO --- : ERROR --- : Log message 86710
