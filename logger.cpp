@@ -146,7 +146,8 @@ public:
   }
 };
 
-int main() {
+
+void benchmark() {
   Logger logger("log.txt");
   Filter filter(LogLevel::INFO);
   Formatter formatter;
@@ -154,7 +155,13 @@ int main() {
   std::queue<std::string> logQueue;
   std::mutex queueMutex;
 
-  std::thread writeThread([&]() {
+  const int numRuns = 5;
+  std::vector<long long> runTimes(numRuns);
+
+  for (int run = 0; run < numRuns; ++run) {
+    auto start = std::chrono::steady_clock::now();
+
+    // Perform the logging operations
     for (size_t i = 0; i < maxLogs * 10; ++i) {
       std::string message = "Log message " + std::to_string(i);
       LogLevel level = (i % 5 == 0)   ? LogLevel::ERROR
@@ -174,30 +181,24 @@ int main() {
 
     logger.stopFlag = true;
     logger.cv.notify_all();
-  });
 
-  std::vector<std::thread> readThreads;
-  for (int i = 0; i < 10; ++i) {
-    readThreads.emplace_back([&]() {
-      while (!logger.stopFlag || !logQueue.empty()) {
-        std::unique_lock<std::mutex> lock(queueMutex);
-        logger.cv.wait(lock,
-                       [&]() { return !logQueue.empty() || logger.stopFlag; });
-
-        while (!logQueue.empty()) {
-          std::string logMessage = logQueue.front();
-          logQueue.pop();
-          logger.writeLog(logMessage.c_str());
-          std::cout << "Reader " << i << ": " << logMessage << std::endl;
-        }
-      }
-    });
+    auto end = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    runTimes[run] = duration.count();
+    std::cout << "Run " << run + 1 << " duration: " << runTimes[run] << " milliseconds" << std::endl;
   }
 
-  writeThread.join();
-  for (auto &thread : readThreads) {
-    thread.join();
+  // Calculate the average time
+  long long totalDuration = 0;
+  for (int run = 0; run < numRuns; ++run) {
+    totalDuration += runTimes[run];
   }
+  double averageDuration = static_cast<double>(totalDuration) / numRuns;
+  std::cout << "Average duration: " << averageDuration << " milliseconds" << std::endl;
+}
 
+int main() {
+  benchmark();
   return 0;
 }
+
