@@ -1,11 +1,5 @@
 # cpp_logger
 
-# 依赖
-1. boost
-```
-sudo apt-get install libboost-all-dev
-```
-
 # 问题记录
 
 ## 2023年6月5日21:24:04
@@ -48,3 +42,14 @@ readThreads.emplace_back([&]() {
 ```
 
 通过这次修改，我们提高了代码的效率和可读性，使得程序更为稳健。
+
+
+# 2023年6月6日00:16:34
+
+**问题描述：**
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  Failed to open the log file
+[1]    169181 IOT instruction (core dumped)  /root/code/cpp/cpp_logger/build/cpp_logger
+
+**解决方案：**
+??

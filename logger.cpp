@@ -1,7 +1,7 @@
 /**
  * @file logger.cpp
  * @brief Implements a multi-threaded logging system with log filtering,
- * formatting, and file rotation.
+ * formatting, and file rotation using zero-copy technology (mmap/munmap).
  * @details
  * Changelog:
  *   2023-06-03: Initial version.
@@ -20,7 +20,8 @@
  * message format, improved error handling, added code comments.
  *   2023-06-06: Used shared_ptr for FileHandler, retained std::queue with mutex and condition_variable for
  * better thread synchronization, enhanced file writing mechanism, added more detailed code comments.
- * @version 0.3.0
+ *   2023-06-07: Added zero-copy technology using mmap/munmap for log writing and improved cache management.
+ * @version 0.4.0
  */
 #include <atomic>
 #include <chrono>
@@ -34,9 +35,13 @@
 #include <mutex>
 #include <queue>
 #include <sstream>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
+#include <fcntl.h>
 
 constexpr size_t logSize = 256;                  // 256 bytes per log
 constexpr size_t maxFileSize = 10 * 1024 * 1024; // 10MB
@@ -71,11 +76,15 @@ private:
 class Logger {
 public:
   explicit Logger(const std::string &filename)
-      : baseFilename(filename), writePos(0), currentFileSize(0) {
+      : baseFilename(filename), writePos(0), currentFileSize(0), logMemory(nullptr) {
     openFile();
+    allocateLogMemory();
   }
 
-  ~Logger() { closeFile(); }
+  ~Logger() {
+    closeFile();
+    deallocateLogMemory();
+  }
 
   // Write log to a file and automatically rotate the file when it reaches maxFileSize
   void writeLog(const char *log) {
@@ -83,8 +92,7 @@ public:
     if (currentFileSize + logSize > maxFileSize) {
       rotateFile();
     }
-    file->getStream()->write(log, strlen(log));
-    file->getStream()->flush();
+    memcpy(logMemory + (writePos * logSize), log, logSize);
     writePos = (writePos + 1) % maxLogs;
     currentFileSize += logSize;
   }
@@ -107,6 +115,7 @@ private:
     closeFile();
     std::filesystem::rename(baseFilename, getNextFilename());
     openFile();
+    currentFileSize = 0;
   }
 
   std::string getNextFilename() {
@@ -115,10 +124,47 @@ private:
     return ss.str();
   }
 
+  void allocateLogMemory() {
+    int fd = open(baseFilename.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+    if (fd == -1) {
+      throw std::runtime_error("Failed to open log file");
+    }
+
+    size_t size = maxFileSize;
+    if (posix_memalign(reinterpret_cast<void **>(&logMemory), sysconf(_SC_PAGESIZE), size) != 0) {
+      close(fd); // Close the file descriptor on error
+      throw std::runtime_error("Failed to allocate log memory");
+    }
+
+    if (ftruncate(fd, size) != 0) {
+      munmap(logMemory, size); // Unmap memory before closing the file descriptor
+      close(fd); // Close the file descriptor on error
+      throw std::runtime_error("Failed to truncate log file");
+    }
+
+    logMemory = reinterpret_cast<char *>(mmap(nullptr, size, PROT_WRITE, MAP_SHARED, fd, 0));
+    if (logMemory == MAP_FAILED) {
+      munmap(logMemory, size); // Unmap memory before closing the file descriptor
+      close(fd); // Close the file descriptor on error
+      throw std::runtime_error("Failed to mmap log memory");
+    }
+
+    close(fd); // Close the file descriptor after mapping memory
+  }
+
+  void deallocateLogMemory() {
+    if (logMemory != nullptr) {
+      size_t size = maxFileSize;
+      munmap(logMemory, size);
+      logMemory = nullptr;
+    }
+  }
+
   std::shared_ptr<FileHandler> file;
   std::atomic<size_t> writePos;
   size_t currentFileSize;
   std::string baseFilename;
+  char *logMemory;
 };
 
 class Filter {
@@ -145,7 +191,6 @@ public:
                   tm.tm_min, tm.tm_sec, levelStr.c_str(), message);
   }
 };
-
 
 void benchmark() {
   Logger logger("log.txt");
@@ -201,4 +246,3 @@ int main() {
   benchmark();
   return 0;
 }
-
