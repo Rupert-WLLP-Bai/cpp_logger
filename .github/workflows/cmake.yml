@@ -21,6 +21,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libboost-all-dev
 
+      - name: Install Google Test
+        run: |
+          sudo apt-get install -y libgtest-dev
+          sudo apt-get install -y cmake
+          cd /usr/src/gtest
+          sudo cmake CMakeLists.txt
+          sudo make
+          sudo cp *.a /usr/lib
+
       - name: Configure CMake
         run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
 
@@ -33,6 +42,10 @@ jobs:
           ctest -C ${{env.BUILD_TYPE}}
           ./test/LoggerTest
 
+      - name: Install Google Benchmark
+        run: |
+          sudo apt-get install -y libbenchmark-dev
+    
       - name: Benchmark
         working-directory: ${{github.workspace}}/build
         run: |
