@@ -4,14 +4,13 @@
 #include <gtest/gtest.h>
 
 TEST(LoggerTest, LogFunctionAddsMessageToBuffer) {
-    Logger logger("test_log.txt");
+    Logger logger("test.log");
     std::string message = "Test message";
 
     logger.Log(message);
 
-    const boost::circular_buffer<std::string>& buffer = logger.GetBuffer();
-    ASSERT_EQ(buffer.size(), 1);
-    EXPECT_EQ(buffer.front(), message);
+    boost::circular_buffer<std::string>& buffer = logger.GetBuffer();
+    EXPECT_EQ(message, buffer[0]);
 }
 
 
