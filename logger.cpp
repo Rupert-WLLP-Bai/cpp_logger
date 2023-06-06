@@ -14,14 +14,19 @@
  * handling for log formatting, fixed memory management in Logger, added error
  * handling for file closing.
  *   2023-06-06: Implemented RAII for file management,
- * used a mutex and condition variable for log messages synchronization, improved memory management, added
- * timestamp to log messages, enhanced file rotation.
- *   2023-06-06: Updated log
- * message format, improved error handling, added code comments.
- *   2023-06-06: Used shared_ptr for FileHandler, retained std::queue with mutex and condition_variable for
- * better thread synchronization, enhanced file writing mechanism, added more detailed code comments.
- *   2023-06-07: Added zero-copy technology using mmap/munmap for log writing and improved cache management.
- * @version 0.4.0
+ * used a mutex and condition variable for log messages synchronization,
+ * improved memory management, added timestamp to log messages, enhanced file
+ * rotation. 
+ *   2023-06-06: Updated log message format, improved error handling,
+ * added code comments. 
+ *   2023-06-06: Used shared_ptr for FileHandler, retained
+ * std::queue with mutex and condition_variable for better thread
+ * synchronization, enhanced file writing mechanism, added more detailed code
+ * comments. 
+ *    2023-06-07: Added zero-copy technology using mmap/munmap for log
+ * writing and improved cache management.
+  *   2023-06-07:  Modified benchmarking code, added ThreadPool class
+ * @version 0.3.0 fix-1
  */
 #include <atomic>
 #include <chrono>
@@ -85,6 +90,11 @@ public:
   }
 
   ~Logger() {
+    // FIXME: Ensure all logs are written to file before exiting
+    auto fileStream = file->getStream();
+    fileStream->write(logMemory, currentFileSize);
+    fileStream->flush();
+
     stopFlag = true;
     cv.notify_all();
     pool.shutdown();
@@ -104,6 +114,11 @@ public:
       memcpy(logMemory + (writePos * logSize), log, logSize);
       writePos = (writePos + 1) % maxLogs;
       currentFileSize += logSize;
+
+      // FIXME: write to file
+      auto fileStream = file->getStream();
+      fileStream->write(log, logSize);
+      fileStream->flush();
     });
   }
 
@@ -261,9 +276,6 @@ void benchmark() {
   Filter filter(LogLevel::INFO);
   Formatter formatter;
 
-  std::queue<std::string> logQueue;
-  std::mutex queueMutex;
-
   const int numRuns = 10; // Number of runs to perform
   std::vector<long long> runTimes(numRuns);
 
@@ -286,21 +298,18 @@ void benchmark() {
         char log[logSize];
         formatter.formatLog(log, level, message.c_str());
 
-        std::lock_guard<std::mutex> lock(queueMutex);
-        logQueue.push(log);
-        logger.cv.notify_all();
+        logger.writeLog(log);
       }
     }
 
     logger.stopFlag = true;
-    logger.cv.notify_all();
 
     auto end = std::chrono::steady_clock::now();
     auto duration =
         std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     runTimes[run] = duration.count();
-    std::cout << "  " << std::setw(3) << run + 1 << "    |  "
-              << std::setw(12) << runTimes[run] << std::endl;
+    std::cout << "  " << std::setw(3) << run + 1 << "    |  " << std::setw(12)
+              << runTimes[run] << std::endl;
   }
 
   std::cout << "----------------------------------------" << std::endl;
@@ -316,12 +325,14 @@ void benchmark() {
   }
   double averageDuration = static_cast<double>(totalDuration) / numRuns;
 
-  std::cout << "Average duration: " << std::setw(12) << averageDuration << " milliseconds" << std::endl;
-  std::cout << "Minimum duration: " << std::setw(12) << minDuration << " milliseconds" << std::endl;
-  std::cout << "Maximum duration: " << std::setw(12) << maxDuration << " milliseconds" << std::endl;
+  std::cout << "Average duration: " << std::setw(12) << averageDuration
+            << " milliseconds" << std::endl;
+  std::cout << "Minimum duration: " << std::setw(12) << minDuration
+            << " milliseconds" << std::endl;
+  std::cout << "Maximum duration: " << std::setw(12) << maxDuration
+            << " milliseconds" << std::endl;
   std::cout << "----------------------------------------" << std::endl;
 }
-
 
 int main() {
   benchmark();
