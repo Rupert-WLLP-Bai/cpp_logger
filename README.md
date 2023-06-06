@@ -1,7 +1,7 @@
 # cpp_logger
 
 ## 版本
-v0.1.1
+v0.1.2
 
 ## benchmark记录
 
@@ -12,18 +12,18 @@ CPU Caches:
   L1 Instruction 32 KiB (x1)
   L2 Unified 1024 KiB (x1)
   L3 Unified 36608 KiB (x1)
-Load Average: 0.53, 1.05, 0.62
+Load Average: 0.58, 0.34, 0.29
 -----------------------------------------------------------------
 Benchmark                       Time             CPU   Iterations
 -----------------------------------------------------------------
-BM_Log_64B/threads:1          126 ns          118 ns      5881613
-BM_Log_128B/threads:1         132 ns          123 ns      5739113
-BM_Log_256B/threads:1         125 ns          115 ns      6229789
-BM_Log_512B/threads:1         138 ns          120 ns      5641344
-BM_Log_1024B/threads:1        147 ns          124 ns      5676532
-BM_Log_2048B/threads:1        128 ns          116 ns      5847574
-BM_Log_4096B/threads:1        130 ns          117 ns      5868703
-BM_Log_8192B/threads:1        128 ns          121 ns      5919377
+BM_Log_64B/threads:1         52.9 ns         52.7 ns     13261497
+BM_Log_128B/threads:1        52.6 ns         52.5 ns     13278637
+BM_Log_256B/threads:1        53.0 ns         52.7 ns     13193123
+BM_Log_512B/threads:1        52.7 ns         52.7 ns     13214474
+BM_Log_1024B/threads:1       53.0 ns         52.9 ns     13257544
+BM_Log_2048B/threads:1       52.8 ns         52.8 ns     13156155
+BM_Log_4096B/threads:1       52.8 ns         52.7 ns     13250868
+BM_Log_8192B/threads:1       55.3 ns         55.3 ns     13247680
 ```
 
 ## 技术
