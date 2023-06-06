@@ -49,6 +49,9 @@
 #include <unistd.h>
 #include <vector>
 
+// use the lock-free queue
+#include <boost/lockfree/queue.hpp>
+
 constexpr size_t logSize = 256;                  // 256 bytes per log
 constexpr size_t maxFileSize = 10 * 1024 * 1024; // 10MB
 constexpr size_t maxLogs = maxFileSize / logSize;
