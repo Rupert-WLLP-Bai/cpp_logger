@@ -1,86 +1,68 @@
 # cpp_logger
 
-# GPT4的优化建议
-这个程序实现了一个多线程的日志系统，使用了如下技术：
+## 技术
 
-1. **C++ Standard Library（C++标准库）**：包括文件、线程、互斥锁、条件变量、字符串、时间、原子操作等库函数和类型。
+1. 零拷贝
+2. 多线程
+3. 无锁队列
+4. 缓存管理
 
-2. **线程池（ThreadPool）**：该程序中实现了一个简单的线程池，用于分发日志写入任务。
+## 运行环境
 
-3. **零拷贝技术（Zero-Copy Technology）**：通过mmap/munmap进行内存映射，达到高效读写文件。
+Ubuntu 20.04
 
-4. **日志过滤（Log Filtering）**：实现了基于日志级别的过滤机制。
+## 依赖
 
-5. **日志格式化（Log Formatting）**：实现了一种日志消息的格式化方式，包括时间戳和日志级别。
+1. benchmark
+2. boost
+3. googletest
 
-6. **RAII（Resource Acquisition Is Initialization）**：使用了RAII技术管理资源，如文件句柄和分配的内存等。
+## 安装依赖
 
-7. **日志文件轮转（Log File Rotation）**：当日志文件达到一定大小时，进行日志文件的轮转。
+1. benchmark
 
-以下是一些可能的优化方案：
-
-1. **使用线程安全队列**：在处理日志消息的过程中，如果有大量的线程都在尝试写入日志，那么使用一个线程安全的队列将会更有效。这样可以避免对整个队列进行锁定，提高性能。
-
-2. **异步写入日志**：在现有实现中，日志写入是同步进行的，这可能会导致一些性能瓶颈。你可以考虑实现异步日志写入，即将日志消息放入一个队列，然后在后台线程中进行处理。
-
-3. **批量处理日志消息**：批量处理日志消息可以提高日志系统的性能。这样可以减少对磁盘的写入次数，进一步提高性能。
-
-4. **压缩旧日志文件**：当日志文件轮转时，可以考虑将旧的日志文件进行压缩，以节省磁盘空间。
-
-5. **使用更高效的日志级别字符串化方式**：当前的实现是使用数组，可以考虑使用哈希表等数据结构，根据实际情况选择。
-
-6. **缓冲区溢出检查**：在写入日志的时候，需要确保不会出现缓冲区溢出的问题，你需要对此进行检查。
-
-# 问题记录
-
-## 2023年6月5日21:24:04
-
-**问题描述：**
-1. 这段代码的主要问题是，读取线程可能会无限循环，因为它们在等待新的日志消息时没有休眠或等待。这可能会导致CPU使用率非常高。你可能需要添加一种机制来暂停或延迟读取线程，直到有新的日志消息可读。
-2. 此外，你的日志系统目前没有处理多线程环境中的竞态条件。例如，如果两个线程同时调用writeLog方法，它们可能会覆盖彼此的日志消息。你可能需要添加一个锁或其他同步机制来防止这种情况。
-3. 最后，你的日志系统没有提供关闭或清理资源的方法。在程序结束时，你可能需要关闭文件描述符和取消内存映射。你也可能需要提供一种方法来停止读取线程，否则它们可能会在程序结束后继续运行。
-4. 在Logger类的构造函数中，为buffer分配内存时，使用了mmap函数。这可能导致段错误，因为mmap函数要求指定的长度是页的整数倍。
-
-**解决方案：**
-1. 加入`std::mutex`和`std::condition_variable`，分别用于加锁和唤醒线程。
-2. 以上两个问题都解决了，但是还有一个问题，就是当日志文件写满时，会出现问题，因为此时写入的位置会回到文件开头，这样就会覆盖之前的日志，所以需要加入一个判断，当写入的位置超过文件大小时，就不再写入，直到文件被清空。
-3. 使用posix_memalign函数分配内存，该函数可以保证分配的内存是页的整数倍。
-
-
-## 2023年6月5日22:10:08 (Provided by GPT-3.5)
-
-**问题描述：**
-我们的代码出现了重复格式化日志的问题。原因在于我们误解了Formatter类的目的。Formatter类的目的是用于格式化日志消息，我们在`writeThread`中正确地使用它来格式化推入`logQueue`的消息。然而，在我们的`readThread`中，我们对那些已经格式化的日志进行拆分，然后再次格式化。这导致了日志嵌套格式化的现象，使得输出混乱。
-
-**解决方案：**
-我们在读取线程中直接将消息从日志队列写入文件，而不是再次格式化它们。这样做，我们可以确保日志消息正确格式化，避免了重复格式化的问题。
-
-```cpp
-readThreads.emplace_back([&]() {
-  while (!logger.stopFlag) {
-    std::unique_lock<std::mutex> lock(queueMutex);
-    logger.cv.wait(lock, [&]() { return !logQueue.empty() || logger.stopFlag; });
-
-    while (!logQueue.empty()) {
-      std::string logMessage = logQueue.front();
-      logQueue.pop();
-
-      logger.writeLog(logMessage.c_str());
-      std::cout << "Reader " << i << ": " << logMessage << std::endl;
-    }
-  }
-});
+```bash
+sudo apt install libbenchmark-dev
 ```
 
-通过这次修改，我们提高了代码的效率和可读性，使得程序更为稳健。
+2. boost
+
+```bash
+sudo apt install libboost-all-dev
+```
+
+3. googletest
+
+```bash
+sudo apt install libgtest-dev
+```
 
 
-# 2023年6月6日00:16:34
 
-**问题描述：**
-terminate called after throwing an instance of 'std::runtime_error'
-  what():  Failed to open the log file
-[1]    169181 IOT instruction (core dumped)  /root/code/cpp/cpp_logger/build/cpp_logger
+## 运行
 
-**解决方案：**
-??
+```bash
+mkdir build
+cd build
+cmake ..
+make
+./cpp_logger
+```
+
+## 运行结果(例)
+
+```
+2023-06-06T20:47:04+08:00
+Running /root/code/cpp/cpp_logger/build/cpp_logger
+Run on (2 X 2600 MHz CPU s)
+CPU Caches:
+  L1 Data 32 KiB (x1)
+  L1 Instruction 32 KiB (x1)
+  L2 Unified 1024 KiB (x1)
+  L3 Unified 36608 KiB (x1)
+Load Average: 0.49, 0.15, 0.12
+-----------------------------------------------------
+Benchmark           Time             CPU   Iterations
+-----------------------------------------------------
+BM_Log            936 ns         93.9 ns      8307871
+```
