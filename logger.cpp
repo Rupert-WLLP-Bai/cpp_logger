@@ -28,8 +28,10 @@
 #include <condition_variable>
 #include <cstdio>
 #include <cstring>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -41,7 +43,6 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
-#include <fcntl.h>
 
 constexpr size_t logSize = 256;                  // 256 bytes per log
 constexpr size_t maxFileSize = 10 * 1024 * 1024; // 10MB
@@ -76,41 +77,48 @@ private:
 class Logger {
 public:
   explicit Logger(const std::string &filename)
-      : baseFilename(filename), writePos(0), currentFileSize(0), logMemory(nullptr) {
+      : baseFilename(filename), writePos(0), currentFileSize(0),
+        logMemory(nullptr), stopFlag(false),
+        pool(std::thread::hardware_concurrency()) {
     openFile();
     allocateLogMemory();
   }
 
   ~Logger() {
+    stopFlag = true;
+    cv.notify_all();
+    pool.shutdown();
+
     closeFile();
     deallocateLogMemory();
   }
 
-  // Write log to a file and automatically rotate the file when it reaches maxFileSize
+  // Write log to a file and automatically rotate the file when it reaches
+  // maxFileSize
   void writeLog(const char *log) {
-    std::lock_guard<std::mutex> lock(writeMutex);
-    if (currentFileSize + logSize > maxFileSize) {
-      rotateFile();
-    }
-    memcpy(logMemory + (writePos * logSize), log, logSize);
-    writePos = (writePos + 1) % maxLogs;
-    currentFileSize += logSize;
+    pool.submit([this, log]() {
+      std::lock_guard<std::mutex> lock(writeMutex);
+      if (currentFileSize + logSize > maxFileSize) {
+        rotateFile();
+      }
+      memcpy(logMemory + (writePos * logSize), log, logSize);
+      writePos = (writePos + 1) % maxLogs;
+      currentFileSize += logSize;
+    });
   }
 
   std::atomic<size_t> &getWritePos() { return writePos; }
-
-  bool stopFlag = false;
   std::mutex writeMutex;
   std::condition_variable cv;
+  std::atomic<bool> stopFlag;
 
 private:
-  void openFile() {
-    file = std::make_shared<FileHandler>(baseFilename);
-  }
+  void openFile() { file = std::make_shared<FileHandler>(baseFilename); }
 
   void closeFile() { file.reset(); }
 
-  // Rotate the file by renaming the old file with a timestamp and open a new file
+  // Rotate the file by renaming the old file with a timestamp and open a new
+  // file
   void rotateFile() {
     closeFile();
     std::filesystem::rename(baseFilename, getNextFilename());
@@ -131,21 +139,15 @@ private:
     }
 
     size_t size = maxFileSize;
-    if (posix_memalign(reinterpret_cast<void **>(&logMemory), sysconf(_SC_PAGESIZE), size) != 0) {
-      close(fd); // Close the file descriptor on error
-      throw std::runtime_error("Failed to allocate log memory");
-    }
-
     if (ftruncate(fd, size) != 0) {
-      munmap(logMemory, size); // Unmap memory before closing the file descriptor
-      close(fd); // Close the file descriptor on error
+      close(fd);
       throw std::runtime_error("Failed to truncate log file");
     }
 
-    logMemory = reinterpret_cast<char *>(mmap(nullptr, size, PROT_WRITE, MAP_SHARED, fd, 0));
+    logMemory = reinterpret_cast<char *>(
+        mmap(nullptr, size, PROT_WRITE, MAP_SHARED, fd, 0));
     if (logMemory == MAP_FAILED) {
-      munmap(logMemory, size); // Unmap memory before closing the file descriptor
-      close(fd); // Close the file descriptor on error
+      close(fd);
       throw std::runtime_error("Failed to mmap log memory");
     }
 
@@ -165,6 +167,68 @@ private:
   size_t currentFileSize;
   std::string baseFilename;
   char *logMemory;
+
+  // 线程池定义
+  class ThreadPool {
+  public:
+    explicit ThreadPool(size_t numThreads) : stop(false) {
+      for (size_t i = 0; i < numThreads; ++i) {
+        threads.emplace_back([this]() {
+          while (true) {
+            std::function<void()> task;
+            {
+              std::unique_lock<std::mutex> lock(queueMutex);
+              cv.wait(lock, [this]() { return stop || !tasks.empty(); });
+              if (stop && tasks.empty()) {
+                return;
+              }
+              task = std::move(tasks.front());
+              tasks.pop();
+            }
+            task();
+          }
+        });
+      }
+    }
+
+    ~ThreadPool() {
+      {
+        std::unique_lock<std::mutex> lock(queueMutex);
+        stop = true;
+      }
+      cv.notify_all();
+      for (std::thread &thread : threads) {
+        thread.join();
+      }
+    }
+
+    template <class F, class... Args> void submit(F &&f, Args &&...args) {
+      {
+        std::unique_lock<std::mutex> lock(queueMutex);
+        tasks.emplace([f = std::forward<F>(f),
+                       args = std::make_tuple(std::forward<Args>(
+                           args)...)]() mutable { std::apply(f, args); });
+      }
+      cv.notify_one();
+    }
+
+    void shutdown() {
+      {
+        std::unique_lock<std::mutex> lock(queueMutex);
+        stop = true;
+      }
+      cv.notify_all();
+    }
+
+  private:
+    std::vector<std::thread> threads;
+    std::queue<std::function<void()>> tasks;
+    std::mutex queueMutex;
+    std::condition_variable cv;
+    std::atomic<bool> stop;
+  };
+
+  ThreadPool pool;
 };
 
 class Filter {
@@ -200,8 +264,12 @@ void benchmark() {
   std::queue<std::string> logQueue;
   std::mutex queueMutex;
 
-  const int numRuns = 5;
+  const int numRuns = 10; // Number of runs to perform
   std::vector<long long> runTimes(numRuns);
+
+  std::cout << "----------------------------------------" << std::endl;
+  std::cout << "  Run    |  Duration (ms)" << std::endl;
+  std::cout << "----------------------------------------" << std::endl;
 
   for (int run = 0; run < numRuns; ++run) {
     auto start = std::chrono::steady_clock::now();
@@ -228,19 +296,32 @@ void benchmark() {
     logger.cv.notify_all();
 
     auto end = std::chrono::steady_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    auto duration =
+        std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     runTimes[run] = duration.count();
-    std::cout << "Run " << run + 1 << " duration: " << runTimes[run] << " milliseconds" << std::endl;
+    std::cout << "  " << std::setw(3) << run + 1 << "    |  "
+              << std::setw(12) << runTimes[run] << std::endl;
   }
 
-  // Calculate the average time
+  std::cout << "----------------------------------------" << std::endl;
+
+  // Calculate the average, minimum, and maximum time
   long long totalDuration = 0;
+  long long minDuration = runTimes[0];
+  long long maxDuration = runTimes[0];
   for (int run = 0; run < numRuns; ++run) {
     totalDuration += runTimes[run];
+    minDuration = std::min(minDuration, runTimes[run]);
+    maxDuration = std::max(maxDuration, runTimes[run]);
   }
   double averageDuration = static_cast<double>(totalDuration) / numRuns;
-  std::cout << "Average duration: " << averageDuration << " milliseconds" << std::endl;
+
+  std::cout << "Average duration: " << std::setw(12) << averageDuration << " milliseconds" << std::endl;
+  std::cout << "Minimum duration: " << std::setw(12) << minDuration << " milliseconds" << std::endl;
+  std::cout << "Maximum duration: " << std::setw(12) << maxDuration << " milliseconds" << std::endl;
+  std::cout << "----------------------------------------" << std::endl;
 }
+
 
 int main() {
   benchmark();
