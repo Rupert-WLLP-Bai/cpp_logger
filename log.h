@@ -12,7 +12,7 @@ class Logger {
 public:
     Logger(const std::string& file_path);
     ~Logger();
-
+    boost::circular_buffer<std::string> GetBuffer() const { return buffer_; }
     void Log(const std::string& message);
 
 private:
