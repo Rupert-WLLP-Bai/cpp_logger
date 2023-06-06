@@ -42,6 +42,7 @@ Ubuntu 20.04
 1. benchmark
 2. boost
 3. googletest
+4. spdlog
 
 ## 安装依赖
 
@@ -63,6 +64,11 @@ sudo apt install libboost-all-dev
 sudo apt install libgtest-dev
 ```
 
+4. spdlog
+
+```bash
+sudo apt install libspdlog-dev
+```
 
 
 ## 运行

@@ -1,28 +1,64 @@
 #include "log.h"
 #include <benchmark/benchmark.h>
-#include <cstdio> // 添加头文件
+#include <cstdio>
 #include <cstdlib>
 #include <iomanip>
+#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/spdlog.h>
 #include <string>
+#include <thread>
 #include <vector>
 
 void RemoveLogFile() { std::remove("log.txt"); }
 
-static void BM_Log(benchmark::State &state, size_t messageSize) {
+static void BM_Log_MyLogger(benchmark::State &state) {
   Logger logger("log.txt");
-  std::string message(messageSize, 'X');
+  std::string message(state.range(0), 'X');
 
   for (auto _ : state) {
-    logger.Log(message);
+    std::vector<std::thread> threads;
+    for (int i = 0; i < state.threads(); ++i) {
+      threads.emplace_back([&logger, &message, &state]() {
+        for (int j = 0; j < state.iterations(); ++j) {
+          logger.Log(message);
+        }
+      });
+    }
+
+    for (auto &thread : threads) {
+      thread.join();
+    }
   }
 }
 
-// 定义日志消息的大小范围（字节数）
+static void BM_Log_Spdlog(benchmark::State &state) {
+  auto logger = spdlog::get("logger");
+  std::string message(state.range(0), 'X');
+
+  for (auto _ : state) {
+    std::vector<std::thread> threads;
+    for (int i = 0; i < state.threads(); ++i) {
+      threads.emplace_back([&logger, &message, &state]() {
+        for (int j = 0; j < state.iterations(); ++j) {
+          logger->info(message);
+        }
+      });
+    }
+
+    for (auto &thread : threads) {
+      thread.join();
+    }
+  }
+  spdlog::drop("logger");
+}
+
+// Define different log sizes to be benchmarked (in bytes)
 const std::vector<size_t> messageSizes = {
     64,    128,   256,   512,    1024,   2048,   4096,    8192,
-    16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152};
+    16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152,
+    4194304, 8388608, 16777216, 33554432};
 
-// 注册基准测试函数
+// Register benchmark functions
 void RegisterBenchmarks() {
   const std::vector<std::string> units = {" B", "KB", "MB", "GB"};
 
@@ -30,7 +66,7 @@ void RegisterBenchmarks() {
     std::ostringstream benchmarkNameStream;
     benchmarkNameStream << "BM_Log/";
 
-    // 转换大小为合适的单位
+    // Convert size to a suitable unit
     double adjustedSize = static_cast<double>(size);
     size_t unitIndex = 0;
     while (adjustedSize >= 1024 && unitIndex < units.size() - 1) {
@@ -38,31 +74,43 @@ void RegisterBenchmarks() {
       unitIndex++;
     }
 
-    // 生成对齐的基准测试名称
+    // Generate aligned benchmark name
     benchmarkNameStream << std::setw(4) << std::fixed << std::setprecision(0)
                         << adjustedSize << " " << units[unitIndex];
     std::string benchmarkName = benchmarkNameStream.str();
 
-    // 注册基准测试函数
-    benchmark::RegisterBenchmark(benchmarkName.c_str(), BM_Log, size)
-        ->Threads(1);
+    // Register benchmark functions with different log sizes and threads
+    benchmark::RegisterBenchmark((benchmarkName + "_MyLogger").c_str(),
+                                 BM_Log_MyLogger)
+        ->Arg(size)
+        ->Threads(4)
+        ->UseRealTime(); // Use real-time measurements for more accurate results
+
+    benchmark::RegisterBenchmark((benchmarkName + "_Spdlog").c_str(),
+                                 BM_Log_Spdlog)
+        ->Arg(size)
+        ->Threads(4)
+        ->UseRealTime(); // Use real-time measurements for more accurate results
   }
 }
 
 int main(int argc, char **argv) {
-  // 在基准测试之前执行文件删除操作
+  // Remove log file before running the benchmarks
   RemoveLogFile();
 
-  // 注册基准测试
+  // Create logger
+  auto logger = spdlog::basic_logger_mt("logger", "log.txt", true);
+
+  // Register the benchmarks
   RegisterBenchmarks();
 
-  // 运行基准测试
+  // Run the benchmarks
   ::benchmark::Initialize(&argc, argv);
   if (::benchmark::ReportUnrecognizedArguments(argc, argv))
     return 1;
   ::benchmark::RunSpecifiedBenchmarks();
 
-  // 在基准测试之后执行文件删除操作
+  // Remove log file after running the benchmarks
   atexit(RemoveLogFile);
 
   return 0;

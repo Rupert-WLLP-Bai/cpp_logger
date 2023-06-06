@@ -12,13 +12,15 @@
 
 class Logger {
 public:
-    Logger(const std::string& file_path);
+    Logger(const std::string& file_path, size_t buffer_max_size, size_t batch_size);
+    Logger(const std::string& file_path) : Logger(file_path, 1024, 128) {}
     ~Logger();
     boost::circular_buffer<std::string>& GetBuffer() { return buffer_; }
     void Log(const std::string& message);
 
 private:
     void AsyncLogThread();
+    void FlushBufferToFile();
 
     bool running_;
     std::thread async_log_thread_;

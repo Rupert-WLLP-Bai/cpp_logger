@@ -23,5 +23,7 @@ gtest_discover_tests(LoggerTest)
 set_target_properties(LoggerTest PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
 )
+# Find and include the spdlog library
+find_package(spdlog REQUIRED)
 
-target_link_libraries(cpp_logger PRIVATE benchmark::benchmark)
+target_link_libraries(cpp_logger PRIVATE benchmark::benchmark spdlog::spdlog)
