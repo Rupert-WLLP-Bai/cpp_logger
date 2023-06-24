@@ -28,6 +28,10 @@ jobs:
       - name: Install Google Benchmark
         run: |
           sudo apt-get install -y libbenchmark-dev
+      
+      - name: Install spdlog
+        run: |
+          sudo apt-get install -y libspdlog-dev
 
       - name: Configure CMake
         run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}

@@ -45,6 +45,10 @@ Ubuntu 20.04
 4. spdlog
 
 ## 安装依赖
+```bash
+sudo apt install libbenchmark-dev libboost-all-dev libgtest-dev libspdlog-dev
+```
+
 
 1. benchmark
 
